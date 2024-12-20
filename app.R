@@ -1,51 +1,58 @@
-#
-# This is a Shiny web application. You can run the application by clicking
-# the 'Run App' button above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    https://shiny.posit.co/
-#
-
 library(shiny)
+library(bslib)
+library(dplyr)
+library(ggplot2)
 
-# Define UI for application that draws a histogram
-ui <- fluidPage(
+df <- readr::read_csv("penguins.csv")
+# Find subset of columns that are suitable for scatter plot
+df_num <- df |> select(where(is.numeric), -Year)
 
-    # Application title
-    titlePanel("Old Faithful Geyser Data"),
-
-    # Sidebar with a slider input for number of bins 
-    sidebarLayout(
-        sidebarPanel(
-            sliderInput("bins",
-                        "Number of bins:",
-                        min = 1,
-                        max = 50,
-                        value = 30)
-        ),
-
-        # Show a plot of the generated distribution
-        mainPanel(
-           plotOutput("distPlot")
-        )
-    )
+ui <- page_sidebar(
+  theme = bs_theme(bootswatch = "minty"),
+  title = "Penguins explorer",
+  sidebar = sidebar(
+    varSelectInput("xvar", "X variable", df_num, selected = "Bill Length (mm)"),
+    varSelectInput("yvar", "Y variable", df_num, selected = "Bill Depth (mm)"),
+    checkboxGroupInput("species", "Filter by species",
+      choices = unique(df$Species), selected = unique(df$Species)
+    ),
+    hr(), # Add a horizontal rule
+    checkboxInput("by_species", "Show species", TRUE),
+    checkboxInput("show_margins", "Show marginal plots", TRUE),
+    checkboxInput("smooth", "Add smoother"),
+  ),
+  plotOutput("scatter")
 )
 
-# Define server logic required to draw a histogram
-server <- function(input, output) {
+server <- function(input, output, session) {
+  subsetted <- reactive({
+    req(input$species)
+    df |> filter(Species %in% input$species)
+  })
 
-    output$distPlot <- renderPlot({
-        # generate bins based on input$bins from ui.R
-        x    <- faithful[, 2]
-        bins <- seq(min(x), max(x), length.out = input$bins + 1)
+  output$scatter <- renderPlot(
+    {
+      p <- ggplot(subsetted(), aes(!!input$xvar, !!input$yvar)) +
+        theme_light() +
+        list(
+          theme(legend.position = "bottom"),
+          if (input$by_species) aes(color = Species),
+          geom_point(),
+          if (input$smooth) geom_smooth()
+        )
 
-        # draw the histogram with the specified number of bins
-        hist(x, breaks = bins, col = 'darkgray', border = 'white',
-             xlab = 'Waiting time to next eruption (in mins)',
-             main = 'Histogram of waiting times')
-    })
+      if (input$show_margins) {
+        margin_type <- if (input$by_species) "density" else "histogram"
+        p <- p |> ggExtra::ggMarginal(
+          type = margin_type, margins = "both",
+          size = 8, groupColour = input$by_species, groupFill = input$by_species
+        )
+      }
+
+      p
+    },
+    res = 100
+  )
 }
 
-# Run the application 
-shinyApp(ui = ui, server = server)
+shinyApp(ui, server)
