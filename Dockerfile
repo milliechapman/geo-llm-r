@@ -8,8 +8,9 @@ RUN install2.r --error \
     ggplot2 \
     readr \
     ggExtra \
-    mapgl \
     duckdbfs
+
+RUN installGithub.r cboettig/mapgl
 
 COPY . .
 
