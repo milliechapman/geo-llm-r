@@ -3,14 +3,14 @@ FROM rocker/geospatial:latest
 WORKDIR /code
 
 RUN install2.r --error \
+    bslib \
     shiny \
-    dplyr \
-    ggplot2 \
-    readr \
-    ggExtra \
-    duckdbfs
+    shinychat \
+    tidyverse \
+    duckdbfs \
+    markdown
 
-RUN installGithub.r cboettig/mapgl
+RUN installGithub.r cboettig/mapgl tidyverse/ellmer
 
 COPY . .
 
