@@ -12,13 +12,13 @@ library(htmltools)
 
 duckdbfs::load_spatial()
 
-css <- HTML("<link rel='stylesheet' type='text/css' href='styles.css'>")
+css <- HTML("<link rel='stylesheet' type='text/css' href='https://demos.creative-tim.com/material-dashboard/assets/css/material-dashboard.min.css?v=3.2.0'>")
 
 pmtiles <- "https://data.source.coop/cboettig/us-boundaries/mappinginequality.pmtiles"
 
 # Define the UI
 ui <- page_sidebar(
-
+  tags$head(css),
   titlePanel("Demo App"),
   card(
     layout_columns(
