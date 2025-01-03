@@ -8,25 +8,46 @@ library(duckdbfs)
 library(fontawesome)
 library(bsicons)
 library(gt)
+library(htmltools)
+
 duckdbfs::load_spatial()
+
+css <- HTML("<link rel='stylesheet' type='text/css' href='styles.css'>")
 
 pmtiles <- "https://data.source.coop/cboettig/us-boundaries/mappinginequality.pmtiles"
 
 # Define the UI
 ui <- page_sidebar(
 
-  sidebar = sidebar(
+  titlePanel("Demo App"),
+  card(
+    layout_columns(
+    textInput("chat",
+      label = NULL,
+      "Which county has the highest average social vulnerability?",
+      width = "100%"),
+    div(
+    actionButton("user_msg", "", icon = icon("paper-plane"),  class = "btn-primary btn-sm align-bottom"),
+    class = "align-text-bottom"),
+    col_widths = c(11, 1)),
+    fill = FALSE
+  ),
+  layout_columns(
+    card(maplibreOutput("map")),
+    card(includeMarkdown("## Plot"),
+         plotOutput("chart1"),
+         plotOutput("chart2"),
+         ),
 
-    textAreaInput("chat",
-      span(bs_icon("robot", size = "1.5em"), "Ask me a question!"),
-      value = "Which county has the highest average social vulnerability?",
-      width = "100%",
-      height = 100
-    ),
+    col_widths = c(8, 4)
+  ),
 
-    actionButton("user_msg", "Go!", icon = icon("paper-plane"), width = "50%"),
+  gt_output("table"),
 
 
+  card(fill = FALSE,
+    layout_columns(
+    br(),
     accordion(
       open = FALSE,
       accordion_panel("generated SQL Code",
@@ -35,28 +56,21 @@ ui <- page_sidebar(
       accordion_panel("Explanation",
         textOutput("explanation"),
       )
-    ),
-    input_switch("redlines", "Redlined Areas"),
-    input_switch("svi", "Social Vulnerability", value = TRUE),
-    input_switch("richness", "Biodiversity Richness"),
-    input_switch("rsr", "Biodiversity Range Size Rarity"),
-  width = 350,
-  ),
-  titlePanel("Demo App"),
-
-  layout_columns(
-    card(maplibreOutput("map")),
-    card(includeMarkdown("## Plot"),
-         plotOutput("chart1"),
-         plotOutput("chart2"),
-         ),
-
-    col_widths = c(8,4)
+    ), 
+    br(),
+    col_widths = c(2, 8, 2)
+    )
   ),
 
-  gt_output("table"),
+  sidebar = sidebar(
 
-theme = bs_theme(version = "5")
+    input_switch("redlines", "Redlined Areas", value = FALSE),
+    input_switch("svi", "Social Vulnerability", value = FALSE),
+    input_switch("richness", "Biodiversity Richness", value = FALSE),
+    input_switch("rsr", "Biodiversity Range Size Rarity", value = FALSE),
+#  width = 350,
+  ),
+  theme = bs_theme(version = "5")
 )
 
 svi <- "https://data.source.coop/cboettig/social-vulnerability/svi2020_us_tract.parquet" |>
@@ -64,7 +78,6 @@ svi <- "https://data.source.coop/cboettig/social-vulnerability/svi2020_us_tract.
 
 con <- duckdbfs::cached_connection()
 schema <- DBI::dbGetQuery(con, "PRAGMA table_info(svi)")
-#schema <- svi |> head() |> collect() |> str()
 
 system_prompt = glue::glue('
 You are a helpful agent who always replies strictly in JSON-formatted text.
@@ -103,13 +116,13 @@ server <- function(input, output, session) {
     chat_append("chat", stream)
     response <- jsonlite::fromJSON(stream)
 
-    output$sql_code <- renderText({stringr::str_wrap(response$query, width=40)})
-    output$explanation <- renderText({response$explanation})
+    output$sql_code <- renderText({stringr::str_wrap(response$query, width = 60)})
+    output$explanation <- renderText(response$explanation)
 
     df <- DBI::dbGetQuery(con, response$query)
 
     df <- df |> select(-any_of("Shape"))
-    output$table <- render_gt(df, height=300)
+    output$table <- render_gt(df, height = 300)
 
   })
 
