@@ -3,12 +3,15 @@ FROM rocker/geospatial:latest
 WORKDIR /code
 
 RUN install2.r --error \
+    bsicons \
     bslib \
+    duckdbfs \
+    fontawesome \
+    gt \
+    markdown \
     shiny \
     shinychat \
-    tidyverse \
-    duckdbfs \
-    markdown
+    tidyverse
 
 RUN installGithub.r cboettig/mapgl tidyverse/ellmer
 
