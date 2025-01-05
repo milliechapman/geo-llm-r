@@ -1,15 +1,16 @@
 library(shiny)
 library(bslib)
+library(htmltools)
 library(markdown)
-library(shinychat)
-library(mapgl)
-library(dplyr)
-library(ggplot2)
-library(duckdbfs)
 library(fontawesome)
 library(bsicons)
 library(gt)
-library(htmltools)
+library(glue)
+library(ggplot2)
+
+library(mapgl)
+library(dplyr)
+library(duckdbfs)
 
 duckdbfs::load_spatial()
 
@@ -86,10 +87,12 @@ ui <- page_sidebar(
 
 
 
-repo <- ""
-pmtiles <- ""
-parquet <- "https://data.source.coop/cboettig/social-vulnerability/svi2020_us_tract.parquet"
-svi <- open_dataset(parquet, tblname = "svi")
+repo <- "https://data.source.coop/cboettig/social-vulnerability"
+pmtiles <- glue("{repo}/svi2020_us_tract.pmtiles")
+parquet <- glue("{repo}/svi2020_us_tract.parquet")
+svi <- open_dataset(parquet, tblname = "svi") |>
+  filter(RPL_THEMES > 0)
+
 
 con <- duckdbfs::cached_connection()
 schema <- DBI::dbGetQuery(con, "PRAGMA table_info(svi)")
@@ -100,7 +103,10 @@ Your task is to translate the users question into a SQL query that will be run
 against the "svi" table in a duckdb database. The duckdb database has a
 spatial extension which understands PostGIS operations as well. 
 Include semantically meaningful columns like COUNTY and STATE name.
- 
+
+In the data, each row represents an individual census tract. If asked for 
+county or state level statistics, be sure to aggregate across all the tracts
+in that county or state. 
 
 The table schema is <schema>
 
@@ -134,9 +140,20 @@ filter_column <- function(full_data, filtered_data, id_col = "FIPS") {
   list("in", list("get", id_col), list("literal", values))
 }
 
+chart1_data <- svi |>
+  group_by(COUNTY) |>
+  summarise(mean_svi = mean(RPL_THEMES)) |>
+  collect()
+
+chart1 <- chart1_data |>
+  ggplot(aes(mean_svi)) + geom_density(fill="darkred") +
+  ggtitle("County-level vulnerability nation-wide")
+
+
 # Define the server
 server <- function(input, output, session) {
   data <- reactiveValues(df = tibble())
+  output$chart1 <- renderPlot(chart1)
 
   observeEvent(input$user_msg, {
     stream <- chat$chat(input$chat)
@@ -156,14 +173,27 @@ server <- function(input, output, session) {
     df <- df |> select(-any_of("Shape"))
     output$table <- render_gt(df, height = 300)
 
+
+    y_axis <- colnames(df)[!colnames(df) %in% colnames(svi)] 
+    chart2 <- df |> 
+      rename(social_vulnerability = y_axis) |>
+      ggplot(aes(social_vulnerability)) +
+      geom_density(fill="darkred")  +
+      xlim(c(0,1)) +
+      ggtitle("Vulnerability of selected areas")
+
+    output$chart2 <- renderPlot(chart2)
+
     # We need to somehow trigger this df to update the map.
     data$df <- df
 
   })
 
-  output$map <- renderMaplibre({
-    m <- maplibre(center = c(-92.9, 41.3), zoom = 3, height = "400")
 
+
+  output$map <- renderMaplibre({
+
+    m <- maplibre(center = c(-92.9, 41.3), zoom = 3, height = "400")
     if (input$redlines) {
       m <- m |>
         add_fill_layer(
@@ -200,7 +230,7 @@ server <- function(input, output, session) {
         add_fill_layer(
           id = "svi_layer",
           source = list(type = "vector",
-                        url = paste0("pmtiles://", "https://data.source.coop/cboettig/social-vulnerability/svi2020_us_tract.pmtiles")),
+                        url = paste0("pmtiles://", pmtiles)),
           source_layer = "SVI2000_US_tract",
           filter = filter_column(svi, data$df, "FIPS"),
           fill_opacity = 0.5,
@@ -213,16 +243,6 @@ server <- function(input, output, session) {
   m})
 
 
-    chart1 <-
-      svi |>
-      filter(RPL_THEMES > 0) |>
-      group_by(COUNTY) |>
-      summarise(mean_svi = mean(RPL_THEMES)) |>
-      collect() |>
-      ggplot(aes(mean_svi)) + geom_density()
-
-  output$chart1 <- renderPlot(chart1)
-  output$chart2 <- renderPlot(chart1)
 
 }
 
