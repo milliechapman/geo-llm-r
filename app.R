@@ -73,6 +73,11 @@ ui <- page_sidebar(
     input_switch("svi", "Social Vulnerability", value = TRUE),
     input_switch("richness", "Biodiversity Richness", value = FALSE),
     input_switch("rsr", "Biodiversity Range Size Rarity", value = FALSE),
+
+    card(
+      card_header(bs_icon("github"), "Source code:"),
+      a(href = "https://github.com/boettiger-lab/geo-llm-r",
+        "https://github.com/boettiger-lab/geo-llm-r"))
   ),
 
   theme = bs_theme(version = "5")
