@@ -3,7 +3,8 @@ library(bslib)
 library(markdown)
 library(shinychat)
 library(mapgl)
-library(tidyverse)
+library(dplyr)
+library(ggplot2)
 library(duckdbfs)
 library(fontawesome)
 library(bsicons)
@@ -14,10 +15,10 @@ duckdbfs::load_spatial()
 
 css <- HTML("<link rel='stylesheet' type='text/css' href='https://demos.creative-tim.com/material-dashboard/assets/css/material-dashboard.min.css?v=3.2.0'>")
 
-pmtiles <- "https://data.source.coop/cboettig/us-boundaries/mappinginequality.pmtiles"
 
 # Define the UI
 ui <- page_sidebar(
+  fillable = FALSE, # do not squeeze to vertical screen space
   tags$head(css),
   titlePanel("Demo App"),
   card(
@@ -27,7 +28,8 @@ ui <- page_sidebar(
       "Which county has the highest average social vulnerability?",
       width = "100%"),
     div(
-    actionButton("user_msg", "", icon = icon("paper-plane"),  class = "btn-primary btn-sm align-bottom"),
+    actionButton("user_msg", "", icon = icon("paper-plane"),
+                 class = "btn-primary btn-sm align-bottom"),
     class = "align-text-bottom"),
     col_widths = c(11, 1)),
     fill = FALSE
@@ -38,28 +40,31 @@ ui <- page_sidebar(
          plotOutput("chart1"),
          plotOutput("chart2"),
          ),
-
-    col_widths = c(8, 4)
+    col_widths = c(8, 4),
+    row_heights = c("600px"),
+    max_height = "700px"
   ),
+
 
   gt_output("table"),
 
-
-  card(fill = FALSE,
-    layout_columns(
-    br(),
+  card(fill = TRUE,
+    card_header(fa("robot")),
+ 
     accordion(
       open = FALSE,
-      accordion_panel("generated SQL Code",
+      accordion_panel(
+        title = "show sql",
+        icon = fa("terminal"),
         verbatimTextOutput("sql_code"),
       ),
-      accordion_panel("Explanation",
+      accordion_panel(
+        title = "explain",
+        icon = fa("user", prefer_type="solid"),
         textOutput("explanation"),
       )
-    ), 
-    br(),
-    col_widths = c(2, 8, 2)
-    )
+    ),
+
   ),
 
   sidebar = sidebar(
@@ -68,13 +73,18 @@ ui <- page_sidebar(
     input_switch("svi", "Social Vulnerability", value = FALSE),
     input_switch("richness", "Biodiversity Richness", value = FALSE),
     input_switch("rsr", "Biodiversity Range Size Rarity", value = FALSE),
-#  width = 350,
   ),
+
   theme = bs_theme(version = "5")
 )
 
-svi <- "https://data.source.coop/cboettig/social-vulnerability/svi2020_us_tract.parquet" |>
-      open_dataset(tblname = "svi")
+
+
+
+repo <- ""
+pmtiles <- ""
+parquet <- "https://data.source.coop/cboettig/social-vulnerability/svi2020_us_tract.parquet"
+svi <- open_dataset(parquet, tblname = "svi")
 
 con <- duckdbfs::cached_connection()
 schema <- DBI::dbGetQuery(con, "PRAGMA table_info(svi)")
@@ -84,9 +94,8 @@ You are a helpful agent who always replies strictly in JSON-formatted text.
 Your task is to translate the users question into a SQL query that will be run
 against the "svi" table in a duckdb database. The duckdb database has a
 spatial extension which understands PostGIS operations as well. 
-
-
-Be careful to limit any return to no more than 50 rows. 
+Include semantically meaningful columns like COUNTY and STATE name.
+ 
 
 The table schema is <schema>
 
@@ -100,41 +109,60 @@ Format your answer as follows:
 }
 ', .open = "<", .close = ">")
 
+chat <- ellmer::chat_vllm(
+  base_url = "https://llm.nrp-nautilus.io/",
+  model = "llama3",
+  api_key = Sys.getenv("NRP_API_KEY"),
+  system_prompt = system_prompt,
+  api_args = list(temperature = 0)
+)
+
+# helper utilities
+df <- tibble()
+# faster/more scalable to pass maplibre the ids to refilter pmtiles,
+# than to pass it the full geospatial/sf object
+filter_column <- function(full_data, filtered_data, id_col = "FIPS") {
+  if (nrow(filtered_data) < 1) return(NULL)
+  values <- full_data |>
+    inner_join(filtered_data, copy = TRUE) |>
+    pull(id_col)
+  # maplibre syntax for the filter of PMTiles  
+  list("in", list("get", id_col), list("literal", values))
+}
+
 # Define the server
 server <- function(input, output, session) {
-
-  chat <- ellmer::chat_vllm(
-    base_url = "https://llm.nrp-nautilus.io/",
-    model = "llama3",
-    api_key = Sys.getenv("NRP_API_KEY"),
-    system_prompt = system_prompt
-  )
 
   observeEvent(input$user_msg, {
     stream <- chat$chat(input$chat)
 
-    chat_append("chat", stream)
-    response <- jsonlite::fromJSON(stream)
+    # optional, remember previous discussion
+    #chat_append("chat", stream)
 
-    output$sql_code <- renderText({stringr::str_wrap(response$query, width = 60)})
+    # Parse response
+    response <- jsonlite::fromJSON(stream)
+    output$sql_code <- renderText(stringr::str_wrap(response$query, width = 60))
     output$explanation <- renderText(response$explanation)
 
+    # Actually execute the SQL query generated:
     df <- DBI::dbGetQuery(con, response$query)
 
+    # don't display shape column in render
     df <- df |> select(-any_of("Shape"))
     output$table <- render_gt(df, height = 300)
 
+    # We need to somehow trigger this df to update the map.
   })
 
   output$map <- renderMaplibre({
-    m <- maplibre(center=c(-92.9, 41.3), zoom=3)
+    m <- maplibre(center = c(-92.9, 41.3), zoom = 3, height = "400")
 
     if (input$redlines) {
       m <- m |>
         add_fill_layer(
           id = "redlines",
           source = list(type = "vector",
-                        url = paste0("pmtiles://", pmtiles)),
+                        url = paste0("pmtiles://", "https://data.source.coop/cboettig/us-boundaries/mappinginequality.pmtiles")),
           source_layer = "mappinginequality",
           fill_color = list("get", "fill")
         )
@@ -163,18 +191,17 @@ server <- function(input, output, session) {
     if (input$svi) {
       m <- m |>
         add_fill_layer(
-          id = "redlines",
+          id = "svi_layer",
           source = list(type = "vector",
                         url = paste0("pmtiles://", "https://data.source.coop/cboettig/social-vulnerability/svi2020_us_tract.pmtiles")),
           source_layer = "SVI2000_US_tract",
+          filter = filter_column(svi, df, "FIPS"),
           fill_opacity = 0.5,
           fill_color = interpolate(column = "RPL_THEMES",
                                   values = c(0, 1),
                                   stops = c("lightblue", "darkblue"),
                                   na_color = "lightgrey")
         )
-
-    
     }
   m})
 
