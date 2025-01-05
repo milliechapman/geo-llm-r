@@ -25,7 +25,7 @@ ui <- page_sidebar(
     layout_columns(
     textInput("chat",
       label = NULL,
-      "Which county has the highest average social vulnerability?",
+      "Which counties in California have the highest average social vulnerability?",
       width = "100%"),
     div(
     actionButton("user_msg", "", icon = icon("paper-plane"),
@@ -70,7 +70,7 @@ ui <- page_sidebar(
   sidebar = sidebar(
 
     input_switch("redlines", "Redlined Areas", value = FALSE),
-    input_switch("svi", "Social Vulnerability", value = FALSE),
+    input_switch("svi", "Social Vulnerability", value = TRUE),
     input_switch("richness", "Biodiversity Richness", value = FALSE),
     input_switch("rsr", "Biodiversity Range Size Rarity", value = FALSE),
   ),
@@ -118,7 +118,6 @@ chat <- ellmer::chat_vllm(
 )
 
 # helper utilities
-df <- tibble()
 # faster/more scalable to pass maplibre the ids to refilter pmtiles,
 # than to pass it the full geospatial/sf object
 filter_column <- function(full_data, filtered_data, id_col = "FIPS") {
@@ -132,6 +131,7 @@ filter_column <- function(full_data, filtered_data, id_col = "FIPS") {
 
 # Define the server
 server <- function(input, output, session) {
+  data <- reactiveValues(df = tibble())
 
   observeEvent(input$user_msg, {
     stream <- chat$chat(input$chat)
@@ -152,6 +152,8 @@ server <- function(input, output, session) {
     output$table <- render_gt(df, height = 300)
 
     # We need to somehow trigger this df to update the map.
+    data$df <- df
+
   })
 
   output$map <- renderMaplibre({
@@ -195,11 +197,11 @@ server <- function(input, output, session) {
           source = list(type = "vector",
                         url = paste0("pmtiles://", "https://data.source.coop/cboettig/social-vulnerability/svi2020_us_tract.pmtiles")),
           source_layer = "SVI2000_US_tract",
-          filter = filter_column(svi, df, "FIPS"),
+          filter = filter_column(svi, data$df, "FIPS"),
           fill_opacity = 0.5,
           fill_color = interpolate(column = "RPL_THEMES",
                                   values = c(0, 1),
-                                  stops = c("lightblue", "darkblue"),
+                                  stops = c("lightpink", "darkred"),
                                   na_color = "lightgrey")
         )
     }
